@@ -97,6 +97,10 @@
 
         // Main ImpactCalculator component
         const ImpactCalculator = () => {
+            // Innovation cost inputs
+            const [recurringAnnualCost, setRecurringAnnualCost] = useLocalState('recurringAnnualCost', 0);
+            const [oneOffCost, setOneOffCost] = useLocalState('oneOffCost', 0);
+
             // Scope inputs
             const [stores, setStores] = useLocalState('stores', 1);
             const [weeks, setWeeks] = useLocalState('weeks', 1);
@@ -115,7 +119,14 @@
             const incrementalSales = stores * weeks * baseSales * (uplift / 100);
             const grossProfitFromUplift = incrementalSales * (grossMargin / 100);
             const labourSavings = stores * weeks * hoursSaved * labourRate;
-            const totalEbitImpact = grossProfitFromUplift + labourSavings + otherEbit;
+            
+            // Cost calculations (prorated for the duration)
+            const recurringCostForPeriod = (recurringAnnualCost / 52) * weeks; // Convert annual to weekly, then multiply by weeks
+            const totalCosts = recurringCostForPeriod + oneOffCost;
+            
+            // Total EBIT Impact (benefits minus costs)
+            const totalBenefits = grossProfitFromUplift + labourSavings + otherEbit;
+            const totalEbitImpact = totalBenefits - totalCosts;
 
             // Confidence levels
             const confidenceLevels = [10, 25, 50, 75, 100, 110, 120];
@@ -136,6 +147,7 @@
 
             const exportData = () => {
                 const data = {
+                    recurringAnnualCost, oneOffCost,
                     stores, weeks, grossMargin, baseSales, uplift,
                     hoursSaved, labourRate, otherEbit
                 };
@@ -155,6 +167,8 @@
                     reader.onload = (e) => {
                         try {
                             const data = JSON.parse(e.target.result);
+                            setRecurringAnnualCost(data.recurringAnnualCost || 0);
+                            setOneOffCost(data.oneOffCost || 0);
                             setStores(data.stores || 1);
                             setWeeks(data.weeks || 1);
                             setGrossMargin(data.grossMargin || 30);
@@ -178,6 +192,37 @@
                     <div className="mb-8">
                         <h1 className="text-3xl font-bold text-gray-900 mb-2">Impact Calculator</h1>
                         <p className="text-gray-600">Estimate the EBIT impact of your business initiatives</p>
+                    </div>
+
+                    {/* Innovation Initiative Costs Section */}
+                    <div className="mb-8">
+                        <Card title="Innovation Initiative Costs" className="bg-red-50 border-red-200">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <NumberInput
+                                    label="Recurring Annual Cost ($)"
+                                    value={recurringAnnualCost}
+                                    onChange={setRecurringAnnualCost}
+                                    min={0}
+                                    hint="Annual recurring costs (e.g., software subscriptions, maintenance)"
+                                />
+                                <NumberInput
+                                    label="One-off Cost ($)"
+                                    value={oneOffCost}
+                                    onChange={setOneOffCost}
+                                    min={0}
+                                    hint="One-time implementation costs (e.g., setup, training, equipment)"
+                                />
+                            </div>
+                            <div className="mt-4 p-3 bg-white rounded-lg border">
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-gray-600">Cost for this period ({weeks} weeks):</span>
+                                    <span className="font-medium text-red-600">{formatCurrency(totalCosts)}</span>
+                                </div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                    Recurring: {formatCurrency(recurringCostForPeriod)} + One-off: {formatCurrency(oneOffCost)}
+                                </div>
+                            </div>
+                        </Card>
                     </div>
 
                     {/* Input Sections */}
@@ -257,6 +302,7 @@
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                         <Card title="EBIT Impact Results">
                             <div className="space-y-3">
+                                <div className="text-sm font-semibold text-green-700 mb-2">BENEFITS:</div>
                                 <div className="flex justify-between items-center py-2 border-b border-gray-100">
                                     <span className="text-gray-600">Incremental Sales:</span>
                                     <span className="font-medium">{formatCurrency(incrementalSales)}</span>
@@ -269,13 +315,32 @@
                                     <span className="text-gray-600">Labour Savings:</span>
                                     <span className="font-medium">{formatCurrency(labourSavings)}</span>
                                 </div>
-                                <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                                <div className="flex justify-between items-center py-2 border-b border-gray-200">
                                     <span className="text-gray-600">Other EBIT:</span>
                                     <span className="font-medium">{formatCurrency(otherEbit)}</span>
                                 </div>
-                                <div className="flex justify-between items-center py-3 bg-blue-50 px-4 rounded-lg">
-                                    <span className="font-semibold text-blue-900">Total EBIT Impact:</span>
-                                    <span className="font-bold text-lg text-blue-900">{formatCurrency(totalEbitImpact)}</span>
+                                <div className="flex justify-between items-center py-2 bg-green-50 px-3 rounded-lg">
+                                    <span className="font-medium text-green-700">Total Benefits:</span>
+                                    <span className="font-semibold text-green-700">{formatCurrency(totalBenefits)}</span>
+                                </div>
+                                
+                                <div className="text-sm font-semibold text-red-700 mb-2 mt-4">COSTS:</div>
+                                <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                                    <span className="text-gray-600">Recurring Cost (prorated):</span>
+                                    <span className="font-medium text-red-600">{formatCurrency(recurringCostForPeriod)}</span>
+                                </div>
+                                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                                    <span className="text-gray-600">One-off Cost:</span>
+                                    <span className="font-medium text-red-600">{formatCurrency(oneOffCost)}</span>
+                                </div>
+                                <div className="flex justify-between items-center py-2 bg-red-50 px-3 rounded-lg">
+                                    <span className="font-medium text-red-700">Total Costs:</span>
+                                    <span className="font-semibold text-red-700">{formatCurrency(totalCosts)}</span>
+                                </div>
+                                
+                                <div className={`flex justify-between items-center py-3 px-4 rounded-lg ${totalEbitImpact >= 0 ? 'bg-blue-50' : 'bg-orange-50'}`}>
+                                    <span className={`font-semibold ${totalEbitImpact >= 0 ? 'text-blue-900' : 'text-orange-900'}`}>Net EBIT Impact:</span>
+                                    <span className={`font-bold text-lg ${totalEbitImpact >= 0 ? 'text-blue-900' : 'text-orange-900'}`}>{formatCurrency(totalEbitImpact)}</span>
                                 </div>
                             </div>
                         </Card>
