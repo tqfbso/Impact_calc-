@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Impact Calculator v3 - EBIT Impact Analysis Tool</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.22.5/babel.min.js"></script>
+    <style>
+        /* Dark mode styles */
+        .dark-mode { background-color: #111827; color: #e5e7eb; }
+        .dark-mode .card-dark { background-color: #1f2937; color: #e5e7eb; }
+        .dark-mode .card-dark h3 { color: #f3f4f6; }
+        .dark-mode .input-dark { background-color: #374151; border-color: #4b5563; color: #f3f4f6; }
+        .dark-mode .input-dark:focus { border-color: #3b82f6; }
+        .dark-mode .text-gray-600 { color: #9ca3af; }
+        .dark-mode .text-gray-700 { color: #d1d5db; }
+        .dark-mode .text-gray-800 { color: #e5e7eb; }
+        .dark-mode .text-gray-900 { color: #f9fafb; }
+        .dark-mode .text-gray-500 { color: #9ca3af; }
+        .dark-mode .border-gray-100 { border-color: #374151; }
+        .dark-mode .border-gray-200 { border-color: #374151; }
+        .dark-mode .border-gray-300 { border-color: #4b5563; }
+        .dark-mode .bg-blue-50 { background-color: #1e3a5f; }
+        .dark-mode .text-blue-900 { color: #93c5fd; }
+        .dark-mode .bg-gray-50 { background-color: #111827; }
+        .dark-mode .bg-white { background-color: #1f2937; }
+        .dark-mode .bg-gray-200 { background-color: #374151; }
+        .dark-mode .bg-gray-100 { background-color: #1f2937; }
+        .dark-mode .hover\:bg-gray-300:hover { background-color: #4b5563; }
+        .dark-mode table th { background-color: #1e3a5f; color: #93c5fd; }
+        .dark-mode table td { border-color: #374151; }
+        .dark-mode .tab-active { background-color: #1f2937; color: #f3f4f6; border-color: #3b82f6; }
+        .dark-mode .tab-inactive { background-color: #374151; color: #9ca3af; }
+        .dark-mode .tab-inactive:hover { background-color: #4b5563; }
+
+        /* Print styles */
+        @media print {
+            .no-print { display: none !important; }
+            .card-print { box-shadow: none !important; border: 1px solid #d1d5db !important; break-inside: avoid; }
+            body { background: white !important; color: black !important; }
+            .dark-mode { background: white !important; color: black !important; }
+            .dark-mode .card-dark { background: white !important; color: black !important; }
+            .dark-mode .card-dark h3 { color: #1f2937 !important; }
+            .dark-mode .text-gray-600, .dark-mode .text-gray-700,
+            .dark-mode .text-gray-800, .dark-mode .text-gray-900 { color: #374151 !important; }
+            .dark-mode .bg-blue-50 { background-color: #eff6ff !important; }
+            .dark-mode .text-blue-900 { color: #1e3a8a !important; }
+            .dark-mode table th { background-color: #eff6ff !important; color: #1e3a8a !important; }
+            .dark-mode table td { border-color: #e5e7eb !important; color: #374151 !important; }
+        }
+
+        /* Tab styles */
+        .tab-active { background-color: white; border-bottom: 2px solid #3b82f6; color: #1f2937; font-weight: 600; }
+        .tab-inactive { background-color: #f3f4f6; color: #6b7280; }
+        .tab-inactive:hover { background-color: #e5e7eb; }
+    </style>
+    <!-- Prevent flash of light mode -->
+    <script>
+        (function() {
+            try {
+                var dm = localStorage.getItem('impact_calc_dark_mode');
+                if (dm === 'true') document.documentElement.classList.add('dark-mode');
+            } catch(e) {}
+        })();
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+        // ──────────────────── Helpers ────────────────────
+
+        const formatCurrency = (value) => {
+            return new Intl.NumberFormat('en-AU', {
+                style: 'currency',
+                currency: 'AUD',
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+            }).format(value || 0);
+        };
+
+        const generateId = () => Math.random().toString(36).substr(2, 9);
+
+        const defaultScenario = (name = 'Scenario 1') => ({
+            id: generateId(),
+            name,
+            stores: 1,
+            weeks: 1,
+            grossMargin: 30,
+            baseSales: 10000,
+            uplift: 5,
+            hoursSaved: 2,
+            labourRate: 25,
+            otherEbit: 0,
+            implementationCost: 0
+        });
+
+        const calculateMetrics = (s) => {
+            const incrementalSales = s.stores * s.weeks * s.baseSales * (s.uplift / 100);
+            const grossProfitFromUplift = incrementalSales * (s.grossMargin / 100);
+            const labourSavings = s.stores * s.weeks * s.hoursSaved * s.labourRate;
+            const totalEbitImpact = grossProfitFromUplift + labourSavings + s.otherEbit;
+            const weeklyEbit = s.weeks > 0 ? totalEbitImpact / s.weeks : 0;
+            const annualisedEbit = weeklyEbit * 52;
+            const roi = s.implementationCost > 0 ? (totalEbitImpact / s.implementationCost) * 100 : null;
+            const paybackWeeks = (s.implementationCost > 0 && weeklyEbit > 0) ? s.implementationCost / weeklyEbit : null;
+            return {
+                incrementalSales,
+                grossProfitFromUplift,
+                labourSavings,
+                totalEbitImpact,
+                annualisedEbit,
+                roi,
+                paybackWeeks
+            };
+        };
+
+        // ──────────────────── useLocalState (supports function updaters) ────────────────────
+
+        const useLocalState = (key, initialValue) => {
+            const [value, setValue] = useState(() => {
+                try {
+                    const item = window.localStorage.getItem(key);
+                    if (item) return JSON.parse(item);
+                } catch (error) {
+                    console.error(`Error loading ${key} from localStorage:`, error);
+                }
+                return typeof initialValue === 'function' ? initialValue() : initialValue;
+            });
+
+            const setStoredValue = useCallback((newValue) => {
+                try {
+                    setValue(prev => {
+                        const resolved = typeof newValue === 'function' ? newValue(prev) : newValue;
+                        window.localStorage.setItem(key, JSON.stringify(resolved));
+                        return resolved;
+                    });
+                } catch (error) {
+                    console.error(`Error saving ${key} to localStorage:`, error);
+                }
+            }, [key]);
+
+            return [value, setStoredValue];
+        };
+
+        // ──────────────────── v2 Migration ────────────────────
+
+        const migrateV2Data = () => {
+            if (localStorage.getItem('impact_calc_v2_migrated')) return null;
+            const v2Keys = ['stores','weeks','grossMargin','baseSales','uplift','hoursSaved','labourRate','otherEbit'];
+            const data = {};
+            let found = false;
+            v2Keys.forEach(k => {
+                try {
+                    const raw = localStorage.getItem(`impact_calculator_${k}`);
+                    if (raw !== null) { data[k] = JSON.parse(raw); found = true; }
+                } catch(e) {}
+            });
+            localStorage.setItem('impact_calc_v2_migrated', 'true');
+            if (!found) return null;
+            return {
+                ...defaultScenario('Migrated from v2'),
+                ...data,
+                implementationCost: 0
+            };
+        };
+
+        // ──────────────────── Reusable Components ────────────────────
+
+        const Card = ({ title, children, className = "", darkMode }) => (
+            <div className={`rounded-lg shadow-lg p-6 card-print ${darkMode ? 'card-dark' : 'bg-white'} ${className}`}>
+                {title && <h3 className={`text-lg font-semibold mb-4 ${darkMode ? '' : 'text-gray-800'}`}>{title}</h3>}
+                {children}
+            </div>
+        );
+
+        const Button = ({ children, onClick, className = "", disabled = false, variant = "primary", darkMode }) => {
+            const baseClasses = "px-4 py-2 rounded-lg font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2";
+            const variants = {
+                primary: "bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500 disabled:bg-gray-400",
+                secondary: darkMode
+                    ? "bg-gray-600 text-gray-200 hover:bg-gray-500 focus:ring-gray-500 disabled:bg-gray-700"
+                    : "bg-gray-200 text-gray-800 hover:bg-gray-300 focus:ring-gray-500 disabled:bg-gray-100"
+            };
+            return (
+                <button onClick={onClick} disabled={disabled}
+                    className={`${baseClasses} ${variants[variant]} ${className}`}>
+                    {children}
+                </button>
+            );
+        };
+
+        const NumberInput = ({ label, value, onChange, min, max, step = "any", hint, darkMode }) => (
+            <div className="mb-4">
+                <label className={`block text-sm font-medium mb-1 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                    {label}
+                </label>
+                <input
+                    type="number"
+                    value={value}
+                    onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw === '' || raw === '-') return;
+                        onChange(parseFloat(raw) || 0);
+                    }}
+                    min={min} max={max} step={step}
+                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${darkMode ? 'input-dark' : 'border-gray-300 focus:border-blue-500'}`}
+                />
+                {hint && <p className={`text-xs mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>{hint}</p>}
+            </div>
+        );
+
+        // ──────────────────── Header ────────────────────
+
+        const Header = ({ darkMode, toggleDarkMode }) => (
+            <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h1 className={`text-3xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'} mb-2`}>Impact Calculator</h1>
+                    <p className={darkMode ? 'text-gray-400' : 'text-gray-600'}>Estimate the EBIT impact of your business initiatives (AUD)</p>
+                </div>
+                <div className="flex gap-2 no-print">
+                    <Button variant="secondary" darkMode={darkMode} onClick={() => window.print()}>
+                        Print
+                    </Button>
+                    <Button variant="secondary" darkMode={darkMode} onClick={toggleDarkMode}>
+                        {darkMode ? 'Light Mode' : 'Dark Mode'}
+                    </Button>
+                </div>
+            </div>
+        );
+
+        // ──────────────────── Scenario Tabs ────────────────────
+
+        const ScenarioTabs = ({ scenarios, activeId, setActiveId, setScenarios, darkMode }) => {
+            const [editingId, setEditingId] = useState(null);
+            const [editName, setEditName] = useState('');
+            const inputRef = useRef(null);
+
+            useEffect(() => {
+                if (editingId && inputRef.current) inputRef.current.focus();
+            }, [editingId]);
+
+            const addScenario = () => {
+                if (scenarios.length >= 3) return;
+                const newS = defaultScenario(`Scenario ${scenarios.length + 1}`);
+                setScenarios(prev => [...prev, newS]);
+                setActiveId(newS.id);
+            };
+
+            const removeScenario = (id) => {
+                if (scenarios.length <= 1) return;
+                setScenarios(prev => {
+                    const next = prev.filter(s => s.id !== id);
+                    if (activeId === id) setActiveId(next[0].id);
+                    return next;
+                });
+            };
+
+            const startRename = (s) => { setEditingId(s.id); setEditName(s.name); };
+
+            const commitRename = () => {
+                if (editingId && editName.trim()) {
+                    setScenarios(prev => prev.map(s => s.id === editingId ? { ...s, name: editName.trim() } : s));
+                }
+                setEditingId(null);
+            };
+
+            return (
+                <div className="flex flex-wrap items-center gap-1 mb-6 no-print">
+                    {scenarios.map(s => (
+                        <div key={s.id}
+                            className={`flex items-center px-4 py-2 rounded-t-lg cursor-pointer select-none text-sm ${s.id === activeId ? 'tab-active' : 'tab-inactive'}`}
+                            onClick={() => setActiveId(s.id)}
+                            onDoubleClick={() => startRename(s)}>
+                            {editingId === s.id ? (
+                                <input ref={inputRef} value={editName}
+                                    onChange={e => setEditName(e.target.value)}
+                                    onBlur={commitRename}
+                                    onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setEditingId(null); }}
+                                    className="bg-transparent border-b border-blue-500 outline-none w-24 text-sm"
+                                    onClick={e => e.stopPropagation()} />
+                            ) : (
+                                <span>{s.name}</span>
+                            )}
+                            {scenarios.length > 1 && (
+                                <button className="ml-2 text-gray-400 hover:text-red-500 text-xs font-bold"
+                                    onClick={(e) => { e.stopPropagation(); removeScenario(s.id); }}
+                                    title="Remove scenario">&times;</button>
+                            )}
+                        </div>
+                    ))}
+                    {scenarios.length < 3 && (
+                        <button className={`px-4 py-2 rounded-t-lg text-sm font-medium ${darkMode ? 'text-blue-400 hover:bg-gray-700' : 'text-blue-600 hover:bg-blue-50'}`}
+                            onClick={addScenario}>+ Add Scenario</button>
+                    )}
+                </div>
+            );
+        };
+
+        // ──────────────────── Scenario Editor ────────────────────
+
+        const ScenarioEditor = ({ scenario, updateField, darkMode }) => (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <Card title="Scope" darkMode={darkMode}>
+                    <NumberInput label="# Stores" value={scenario.stores} onChange={v => updateField('stores', v)} min={1} step="1" hint="Number of stores impacted" darkMode={darkMode} />
+                    <NumberInput label="Weeks" value={scenario.weeks} onChange={v => updateField('weeks', v)} min={1} step="1" hint="Duration of the initiative" darkMode={darkMode} />
+                    <NumberInput label="Gross Margin %" value={scenario.grossMargin} onChange={v => updateField('grossMargin', v)} min={0} max={100} hint="Current gross margin percentage" darkMode={darkMode} />
+                </Card>
+
+                <Card title="Sales Uplift" darkMode={darkMode}>
+                    <NumberInput label="Base Sales per Store / Week (A$)" value={scenario.baseSales} onChange={v => updateField('baseSales', v)} min={0} hint="Current weekly sales per store" darkMode={darkMode} />
+                    <NumberInput label="Uplift %" value={scenario.uplift} onChange={v => updateField('uplift', v)} min={-100} max={500} hint="Expected percentage increase in sales" darkMode={darkMode} />
+                </Card>
+
+                <Card title="Labour & Other" darkMode={darkMode}>
+                    <NumberInput label="Hours Saved per Store / Week" value={scenario.hoursSaved} onChange={v => updateField('hoursSaved', v)} hint="Labour hours saved (can be negative)" darkMode={darkMode} />
+                    <NumberInput label="Labour Rate (A$/hr)" value={scenario.labourRate} onChange={v => updateField('labourRate', v)} min={0} hint="Hourly labour cost" darkMode={darkMode} />
+                    <NumberInput label="Other EBIT (A$, + or -)" value={scenario.otherEbit} onChange={v => updateField('otherEbit', v)} hint="Additional EBIT adjustments" darkMode={darkMode} />
+                </Card>
+
+                <Card title="Investment" darkMode={darkMode}>
+                    <NumberInput label="Implementation Cost (A$)" value={scenario.implementationCost} onChange={v => updateField('implementationCost', v)} min={0} hint="Total cost to implement this initiative" darkMode={darkMode} />
+                </Card>
+            </div>
+        );
+
+        // ──────────────────── Scenario Results ────────────────────
+
+        const ScenarioResults = ({ scenario, darkMode }) => {
+            const m = calculateMetrics(scenario);
+            const confidenceLevels = [10, 25, 50, 75, 100, 110, 120];
+
+            const copyTableToClipboard = () => {
+                const headers = "Confidence Level\tEBIT Impact";
+                const rows = confidenceLevels.map(level =>
+                    `${level}%\t${formatCurrency(m.totalEbitImpact * level / 100)}`
+                ).join('\n');
+                navigator.clipboard.writeText(`${headers}\n${rows}`).then(() => alert('Table copied to clipboard!')).catch(err => console.error('Failed to copy:', err));
+            };
+
+            const fmtOrNA = (val, fmt) => val === null || !isFinite(val) ? 'N/A' : fmt(val);
+
+            return (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                    <Card title="EBIT Impact Results" darkMode={darkMode}>
+                        <div className="space-y-3">
+                            {[
+                                ['Incremental Sales', m.incrementalSales],
+                                ['Gross Profit from Uplift', m.grossProfitFromUplift],
+                                ['Labour Savings', m.labourSavings],
+                                ['Other EBIT', scenario.otherEbit],
+                            ].map(([label, val]) => (
+                                <div key={label} className={`flex justify-between items-center py-2 border-b ${darkMode ? 'border-gray-700' : 'border-gray-100'}`}>
+                                    <span className={darkMode ? 'text-gray-400' : 'text-gray-600'}>{label}:</span>
+                                    <span className="font-medium">{formatCurrency(val)}</span>
+                                </div>
+                            ))}
+                            <div className={`flex justify-between items-center py-3 px-4 rounded-lg ${darkMode ? 'bg-blue-900 bg-opacity-30' : 'bg-blue-50'}`}>
+                                <span className={`font-semibold ${darkMode ? 'text-blue-300' : 'text-blue-900'}`}>Total EBIT Impact:</span>
+                                <span className={`font-bold text-lg ${darkMode ? 'text-blue-300' : 'text-blue-900'}`}>{formatCurrency(m.totalEbitImpact)}</span>
+                            </div>
+                            <div className={`space-y-2 pt-2 border-t ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                                <div className="flex justify-between items-center py-1">
+                                    <span className={darkMode ? 'text-gray-400' : 'text-gray-600'}>Annualised EBIT:</span>
+                                    <span className="font-medium">{formatCurrency(m.annualisedEbit)}</span>
+                                </div>
+                                <div className="flex justify-between items-center py-1">
+                                    <span className={darkMode ? 'text-gray-400' : 'text-gray-600'}>ROI:</span>
+                                    <span className="font-medium">{fmtOrNA(m.roi, v => v.toFixed(1) + '%')}</span>
+                                </div>
+                                <div className="flex justify-between items-center py-1">
+                                    <span className={darkMode ? 'text-gray-400' : 'text-gray-600'}>Payback Period:</span>
+                                    <span className="font-medium">{fmtOrNA(m.paybackWeeks, v => v.toFixed(1) + ' weeks')}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </Card>
+
+                    <Card title="Confidence Level Analysis" darkMode={darkMode}>
+                        <div className="space-y-2 mb-4">
+                            {confidenceLevels.map(level => (
+                                <div key={level} className="flex justify-between items-center py-1">
+                                    <span className={darkMode ? 'text-gray-400' : 'text-gray-600'}>{level}%:</span>
+                                    <span className="font-medium">{formatCurrency(m.totalEbitImpact * level / 100)}</span>
+                                </div>
+                            ))}
+                        </div>
+                        <Button onClick={copyTableToClipboard} className="w-full no-print" variant="secondary" darkMode={darkMode}>
+                            Copy Table (TSV)
+                        </Button>
+                    </Card>
+                </div>
+            );
+        };
+
+        // ──────────────────── Comparison View ────────────────────
+
+        const ComparisonView = ({ scenarios, darkMode }) => {
+            if (scenarios.length < 2) return null;
+            const metricsAll = scenarios.map(s => ({ name: s.name, ...calculateMetrics(s), implementationCost: s.implementationCost }));
+            const fmtOrNA = (val, fmt) => val === null || !isFinite(val) ? 'N/A' : fmt(val);
+            const rows = [
+                { label: 'Total EBIT', fn: m => formatCurrency(m.totalEbitImpact) },
+                { label: 'Gross Profit', fn: m => formatCurrency(m.grossProfitFromUplift) },
+                { label: 'Labour Savings', fn: m => formatCurrency(m.labourSavings) },
+                { label: 'ROI', fn: m => fmtOrNA(m.roi, v => v.toFixed(1) + '%') },
+                { label: 'Payback Period', fn: m => fmtOrNA(m.paybackWeeks, v => v.toFixed(1) + ' weeks') },
+                { label: 'Annualised EBIT', fn: m => formatCurrency(m.annualisedEbit) },
+            ];
+
+            return (
+                <Card title="Scenario Comparison" darkMode={darkMode} className="mb-8 overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr>
+                                <th className={`text-left py-2 px-3 rounded-tl-lg ${darkMode ? '' : 'bg-blue-50 text-blue-900'}`}>Metric</th>
+                                {metricsAll.map(m => (
+                                    <th key={m.name} className={`text-right py-2 px-3 ${darkMode ? '' : 'bg-blue-50 text-blue-900'}`}>{m.name}</th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map(row => (
+                                <tr key={row.label} className={`border-t ${darkMode ? 'border-gray-700' : 'border-gray-100'}`}>
+                                    <td className={`py-2 px-3 font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>{row.label}</td>
+                                    {metricsAll.map(m => (
+                                        <td key={m.name} className="text-right py-2 px-3 font-medium">{row.fn(m)}</td>
+                                    ))}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </Card>
+            );
+        };
+
+        // ──────────────────── Charts Section ────────────────────
+
+        const BarChartComponent = ({ scenarios, darkMode }) => {
+            const canvasRef = useRef(null);
+            const chartRef = useRef(null);
+
+            useEffect(() => {
+                if (chartRef.current) chartRef.current.destroy();
+                const ctx = canvasRef.current.getContext('2d');
+                const metricsAll = scenarios.map(s => ({ name: s.name, ...calculateMetrics(s) }));
+                const colors = ['#3b82f6', '#10b981', '#f59e0b'];
+                chartRef.current = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: metricsAll.map(m => m.name),
+                        datasets: [{
+                            label: 'Total EBIT Impact (A$)',
+                            data: metricsAll.map(m => m.totalEbitImpact),
+                            backgroundColor: metricsAll.map((_, i) => colors[i % colors.length]),
+                            borderRadius: 4,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            title: { display: true, text: 'Total EBIT Comparison', color: darkMode ? '#e5e7eb' : '#374151' }
+                        },
+                        scales: {
+                            y: {
+                                ticks: { color: darkMode ? '#9ca3af' : '#6b7280', callback: v => formatCurrency(v) },
+                                grid: { color: darkMode ? '#374151' : '#e5e7eb' }
+                            },
+                            x: {
+                                ticks: { color: darkMode ? '#9ca3af' : '#6b7280' },
+                                grid: { display: false }
+                            }
+                        }
+                    }
+                });
+                return () => { if (chartRef.current) chartRef.current.destroy(); };
+            }, [scenarios, darkMode]);
+
+            return <div style={{ height: '300px' }}><canvas ref={canvasRef}></canvas></div>;
+        };
+
+        const WaterfallChart = ({ scenario, darkMode }) => {
+            const canvasRef = useRef(null);
+            const chartRef = useRef(null);
+
+            useEffect(() => {
+                if (chartRef.current) chartRef.current.destroy();
+                const ctx = canvasRef.current.getContext('2d');
+                const m = calculateMetrics(scenario);
+                const labels = ['Gross Profit', 'Labour Savings', 'Other EBIT', 'Total'];
+                const values = [m.grossProfitFromUplift, m.labourSavings, scenario.otherEbit, m.totalEbitImpact];
+
+                // Build waterfall: spacer + visible segment for each bar
+                const spacers = [];
+                const segments = [];
+                let running = 0;
+                for (let i = 0; i < 3; i++) {
+                    const v = values[i];
+                    if (v >= 0) {
+                        spacers.push(running);
+                        segments.push(v);
+                        running += v;
+                    } else {
+                        spacers.push(running + v);
+                        segments.push(Math.abs(v));
+                        running += v;
+                    }
+                }
+                // Total bar starts at 0
+                spacers.push(m.totalEbitImpact >= 0 ? 0 : m.totalEbitImpact);
+                segments.push(Math.abs(m.totalEbitImpact));
+
+                const segmentColors = [
+                    m.grossProfitFromUplift >= 0 ? '#3b82f6' : '#ef4444',
+                    m.labourSavings >= 0 ? '#10b981' : '#ef4444',
+                    scenario.otherEbit >= 0 ? '#f59e0b' : '#ef4444',
+                    m.totalEbitImpact >= 0 ? '#6366f1' : '#ef4444'
+                ];
+
+                chartRef.current = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels,
+                        datasets: [
+                            {
+                                label: 'Spacer',
+                                data: spacers,
+                                backgroundColor: 'transparent',
+                                borderWidth: 0,
+                                stack: 'stack0'
+                            },
+                            {
+                                label: 'Value',
+                                data: segments,
+                                backgroundColor: segmentColors,
+                                borderRadius: 4,
+                                stack: 'stack0'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            title: { display: true, text: `EBIT Breakdown — ${scenario.name}`, color: darkMode ? '#e5e7eb' : '#374151' },
+                            tooltip: {
+                                callbacks: {
+                                    label: (ctx) => {
+                                        if (ctx.datasetIndex === 0) return null;
+                                        return formatCurrency(values[ctx.dataIndex]);
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { stacked: true, ticks: { color: darkMode ? '#9ca3af' : '#6b7280' }, grid: { display: false } },
+                            y: { stacked: true, ticks: { color: darkMode ? '#9ca3af' : '#6b7280', callback: v => formatCurrency(v) }, grid: { color: darkMode ? '#374151' : '#e5e7eb' } }
+                        }
+                    }
+                });
+                return () => { if (chartRef.current) chartRef.current.destroy(); };
+            }, [scenario, darkMode]);
+
+            return <div style={{ height: '300px' }}><canvas ref={canvasRef}></canvas></div>;
+        };
+
+        const ChartsSection = ({ scenarios, activeScenario, darkMode }) => (
+            <div className={`grid gap-6 mb-8 no-print ${scenarios.length >= 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 max-w-2xl'}`}>
+                {scenarios.length >= 2 && (
+                    <Card title="Scenario Comparison Chart" darkMode={darkMode}>
+                        <BarChartComponent scenarios={scenarios} darkMode={darkMode} />
+                    </Card>
+                )}
+                <Card title="EBIT Waterfall" darkMode={darkMode}>
+                    <WaterfallChart scenario={activeScenario} darkMode={darkMode} />
+                </Card>
+            </div>
+        );
+
+        // ──────────────────── Data Management ────────────────────
+
+        const DataManagement = ({ scenarios, setScenarios, setActiveId, darkMode }) => {
+            const exportData = () => {
+                const data = { version: 3, scenarios, exportedAt: new Date().toISOString() };
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'impact_calculator_v3_data.json';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            const importData = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        let imported;
+                        if (data.version === 3 && Array.isArray(data.scenarios)) {
+                            // v3 format
+                            imported = data.scenarios.map(s => ({
+                                ...defaultScenario(s.name || 'Imported'),
+                                ...s,
+                                id: s.id || generateId()
+                            }));
+                        } else {
+                            // v2 flat format
+                            imported = [{
+                                ...defaultScenario('Imported from v2'),
+                                ...data,
+                                id: generateId(),
+                                implementationCost: data.implementationCost || 0
+                            }];
+                        }
+                        if (imported.length > 0) {
+                            setScenarios(imported);
+                            setActiveId(imported[0].id);
+                            alert('Data imported successfully!');
+                        }
+                    } catch (error) {
+                        alert('Error importing data. Please check the file format.');
+                    }
+                };
+                reader.readAsText(file);
+                event.target.value = '';
+            };
+
+            return (
+                <Card title="Data Management" darkMode={darkMode} className="no-print">
+                    <div className="flex flex-wrap gap-4">
+                        <Button onClick={exportData} darkMode={darkMode}>Export Data (JSON)</Button>
+                        <div className="relative">
+                            <input type="file" accept=".json" onChange={importData}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                            <Button variant="secondary" darkMode={darkMode}>Import Data (JSON)</Button>
+                        </div>
+                    </div>
+                    <p className={`text-xs mt-2 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        All data is automatically saved to your browser's local storage.
+                    </p>
+                </Card>
+            );
+        };
+
+        // ──────────────────── App ────────────────────
+
+        const App = () => {
+            const [darkMode, setDarkMode] = useLocalState('impact_calc_dark_mode', false);
+            const [scenarios, setScenarios] = useLocalState('scenarios_v3', () => {
+                const migrated = migrateV2Data();
+                return migrated ? [{ ...migrated, id: generateId() }] : [defaultScenario()];
+            });
+            const [activeId, setActiveId] = useState(() => (scenarios[0] && scenarios[0].id) || '');
+
+            // Sync dark mode class on body
+            useEffect(() => {
+                if (darkMode) {
+                    document.documentElement.classList.add('dark-mode');
+                    document.body.classList.add('dark-mode');
+                } else {
+                    document.documentElement.classList.remove('dark-mode');
+                    document.body.classList.remove('dark-mode');
+                }
+            }, [darkMode]);
+
+            // Ensure activeId is valid
+            useEffect(() => {
+                if (!scenarios.find(s => s.id === activeId) && scenarios.length > 0) {
+                    setActiveId(scenarios[0].id);
+                }
+            }, [scenarios, activeId]);
+
+            const activeScenario = scenarios.find(s => s.id === activeId) || scenarios[0];
+
+            const updateField = useCallback((field, value) => {
+                setScenarios(prev => prev.map(s => s.id === activeId ? { ...s, [field]: value } : s));
+            }, [activeId, setScenarios]);
+
+            const toggleDarkMode = () => setDarkMode(prev => !prev);
+
+            return (
+                <div className={`min-h-screen ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                    <div className="max-w-7xl mx-auto p-6">
+                        <Header darkMode={darkMode} toggleDarkMode={toggleDarkMode} />
+                        <ScenarioTabs scenarios={scenarios} activeId={activeId} setActiveId={setActiveId} setScenarios={setScenarios} darkMode={darkMode} />
+                        <ScenarioEditor scenario={activeScenario} updateField={updateField} darkMode={darkMode} />
+                        <ScenarioResults scenario={activeScenario} darkMode={darkMode} />
+                        <ComparisonView scenarios={scenarios} darkMode={darkMode} />
+                        <ChartsSection scenarios={scenarios} activeScenario={activeScenario} darkMode={darkMode} />
+                        <DataManagement scenarios={scenarios} setScenarios={setScenarios} setActiveId={setActiveId} darkMode={darkMode} />
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

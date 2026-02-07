@@ -1,0 +1,10 @@
+{
+  "stores": 5,
+  "weeks": 12,
+  "grossMargin": 35,
+  "baseSales": 15000,
+  "uplift": 8,
+  "hoursSaved": 3,
+  "labourRate": 30,
+  "otherEbit": 500
+}
