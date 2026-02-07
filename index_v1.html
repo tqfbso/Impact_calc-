@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Impact Calculator - EBIT Impact Analysis Tool</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.22.5/babel.min.js"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Currency formatting helper
+        const formatCurrency = (value) => {
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0
+            }).format(value || 0);
+        };
+
+        // useLocalState hook for localStorage persistence
+        const useLocalState = (key, initialValue) => {
+            const [value, setValue] = useState(() => {
+                try {
+                    const item = window.localStorage.getItem(`impact_calculator_${key}`);
+                    return item ? JSON.parse(item) : initialValue;
+                } catch (error) {
+                    console.error(`Error loading ${key} from localStorage:`, error);
+                    return initialValue;
+                }
+            });
+
+            const setStoredValue = (newValue) => {
+                try {
+                    setValue(newValue);
+                    window.localStorage.setItem(`impact_calculator_${key}`, JSON.stringify(newValue));
+                } catch (error) {
+                    console.error(`Error saving ${key} to localStorage:`, error);
+                }
+            };
+
+            return [value, setStoredValue];
+        };
+
+        // Card component
+        const Card = ({ title, children, className = "" }) => (
+            <div className={`bg-white rounded-lg shadow-lg p-6 ${className}`}>
+                <h3 className="text-lg font-semibold text-gray-800 mb-4">{title}</h3>
+                {children}
+            </div>
+        );
+
+        // Button component
+        const Button = ({ children, onClick, className = "", disabled = false, variant = "primary" }) => {
+            const baseClasses = "px-4 py-2 rounded-lg font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2";
+            const variants = {
+                primary: "bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500 disabled:bg-gray-400",
+                secondary: "bg-gray-200 text-gray-800 hover:bg-gray-300 focus:ring-gray-500 disabled:bg-gray-100"
+            };
+            
+            return (
+                <button
+                    onClick={onClick}
+                    disabled={disabled}
+                    className={`${baseClasses} ${variants[variant]} ${className}`}
+                >
+                    {children}
+                </button>
+            );
+        };
+
+        // NumberInput component
+        const NumberInput = ({ label, value, onChange, min, max, step = "any", hint }) => (
+            <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {label}
+                </label>
+                <input
+                    type="number"
+                    value={value}
+                    onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+                    min={min}
+                    max={max}
+                    step={step}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
+            </div>
+        );
+
+        // Main ImpactCalculator component
+        const ImpactCalculator = () => {
+            // Scope inputs
+            const [stores, setStores] = useLocalState('stores', 1);
+            const [weeks, setWeeks] = useLocalState('weeks', 1);
+            const [grossMargin, setGrossMargin] = useLocalState('grossMargin', 30);
+
+            // Sales uplift inputs
+            const [baseSales, setBaseSales] = useLocalState('baseSales', 10000);
+            const [uplift, setUplift] = useLocalState('uplift', 5);
+
+            // Labour and other inputs
+            const [hoursSaved, setHoursSaved] = useLocalState('hoursSaved', 2);
+            const [labourRate, setLabourRate] = useLocalState('labourRate', 25);
+            const [otherEbit, setOtherEbit] = useLocalState('otherEbit', 0);
+
+            // Calculations
+            const incrementalSales = stores * weeks * baseSales * (uplift / 100);
+            const grossProfitFromUplift = incrementalSales * (grossMargin / 100);
+            const labourSavings = stores * weeks * hoursSaved * labourRate;
+            const totalEbitImpact = grossProfitFromUplift + labourSavings + otherEbit;
+
+            // Confidence levels
+            const confidenceLevels = [10, 25, 50, 75, 100, 110, 120];
+
+            const copyTableToClipboard = () => {
+                const headers = "Confidence Level\tEBIT Impact";
+                const rows = confidenceLevels.map(level => 
+                    `${level}%\t${formatCurrency(totalEbitImpact * level / 100)}`
+                ).join('\n');
+                const tsvData = `${headers}\n${rows}`;
+                
+                navigator.clipboard.writeText(tsvData).then(() => {
+                    alert('Table copied to clipboard!');
+                }).catch(err => {
+                    console.error('Failed to copy table:', err);
+                });
+            };
+
+            const exportData = () => {
+                const data = {
+                    stores, weeks, grossMargin, baseSales, uplift,
+                    hoursSaved, labourRate, otherEbit
+                };
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'impact_calculator_data.json';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            const importData = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const data = JSON.parse(e.target.result);
+                            setStores(data.stores || 1);
+                            setWeeks(data.weeks || 1);
+                            setGrossMargin(data.grossMargin || 30);
+                            setBaseSales(data.baseSales || 10000);
+                            setUplift(data.uplift || 5);
+                            setHoursSaved(data.hoursSaved || 2);
+                            setLabourRate(data.labourRate || 25);
+                            setOtherEbit(data.otherEbit || 0);
+                            alert('Data imported successfully!');
+                        } catch (error) {
+                            alert('Error importing data. Please check the file format.');
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+                event.target.value = '';
+            };
+
+            return (
+                <div className="max-w-7xl mx-auto p-6">
+                    <div className="mb-8">
+                        <h1 className="text-3xl font-bold text-gray-900 mb-2">Impact Calculator</h1>
+                        <p className="text-gray-600">Estimate the EBIT impact of your business initiatives</p>
+                    </div>
+
+                    {/* Input Sections */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        {/* Scope Card */}
+                        <Card title="Scope">
+                            <NumberInput
+                                label="# Stores"
+                                value={stores}
+                                onChange={setStores}
+                                min={1}
+                                step="1"
+                                hint="Number of stores impacted"
+                            />
+                            <NumberInput
+                                label="Weeks"
+                                value={weeks}
+                                onChange={setWeeks}
+                                min={1}
+                                step="1"
+                                hint="Duration of the initiative"
+                            />
+                            <NumberInput
+                                label="Gross Margin %"
+                                value={grossMargin}
+                                onChange={setGrossMargin}
+                                min={0}
+                                max={100}
+                                hint="Current gross margin percentage"
+                            />
+                        </Card>
+
+                        {/* Sales Uplift Card */}
+                        <Card title="Sales Uplift">
+                            <NumberInput
+                                label="Base Sales per Store / Week ($)"
+                                value={baseSales}
+                                onChange={setBaseSales}
+                                min={0}
+                                hint="Current weekly sales per store"
+                            />
+                            <NumberInput
+                                label="Uplift %"
+                                value={uplift}
+                                onChange={setUplift}
+                                min={-100}
+                                max={500}
+                                hint="Expected percentage increase in sales"
+                            />
+                        </Card>
+
+                        {/* Labour & Other Card */}
+                        <Card title="Labour & Other">
+                            <NumberInput
+                                label="Hours Saved per Store / Week"
+                                value={hoursSaved}
+                                onChange={setHoursSaved}
+                                hint="Labour hours saved (can be negative)"
+                            />
+                            <NumberInput
+                                label="Labour Rate ($/hr)"
+                                value={labourRate}
+                                onChange={setLabourRate}
+                                min={0}
+                                hint="Hourly labour cost"
+                            />
+                            <NumberInput
+                                label="Other EBIT ($, + or -)"
+                                value={otherEbit}
+                                onChange={setOtherEbit}
+                                hint="Additional EBIT adjustments"
+                            />
+                        </Card>
+                    </div>
+
+                    {/* Results Section */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                        <Card title="EBIT Impact Results">
+                            <div className="space-y-3">
+                                <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                                    <span className="text-gray-600">Incremental Sales:</span>
+                                    <span className="font-medium">{formatCurrency(incrementalSales)}</span>
+                                </div>
+                                <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                                    <span className="text-gray-600">Gross Profit from Uplift:</span>
+                                    <span className="font-medium">{formatCurrency(grossProfitFromUplift)}</span>
+                                </div>
+                                <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                                    <span className="text-gray-600">Labour Savings:</span>
+                                    <span className="font-medium">{formatCurrency(labourSavings)}</span>
+                                </div>
+                                <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                                    <span className="text-gray-600">Other EBIT:</span>
+                                    <span className="font-medium">{formatCurrency(otherEbit)}</span>
+                                </div>
+                                <div className="flex justify-between items-center py-3 bg-blue-50 px-4 rounded-lg">
+                                    <span className="font-semibold text-blue-900">Total EBIT Impact:</span>
+                                    <span className="font-bold text-lg text-blue-900">{formatCurrency(totalEbitImpact)}</span>
+                                </div>
+                            </div>
+                        </Card>
+
+                        <Card title="Confidence Level Analysis">
+                            <div className="space-y-2 mb-4">
+                                {confidenceLevels.map(level => (
+                                    <div key={level} className="flex justify-between items-center py-1">
+                                        <span className="text-gray-600">{level}%:</span>
+                                        <span className="font-medium">{formatCurrency(totalEbitImpact * level / 100)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <Button 
+                                onClick={copyTableToClipboard}
+                                className="w-full"
+                                variant="secondary"
+                            >
+                                Copy Table (TSV)
+                            </Button>
+                        </Card>
+                    </div>
+
+                    {/* Data Management */}
+                    <Card title="Data Management">
+                        <div className="flex flex-wrap gap-4">
+                            <Button onClick={exportData}>
+                                Export Data (JSON)
+                            </Button>
+                            <div className="relative">
+                                <input
+                                    type="file"
+                                    accept=".json"
+                                    onChange={importData}
+                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                />
+                                <Button variant="secondary">
+                                    Import Data (JSON)
+                                </Button>
+                            </div>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                            All data is automatically saved to your browser's local storage.
+                        </p>
+                    </Card>
+                </div>
+            );
+        };
+
+        // App component
+        const App = () => {
+            return <ImpactCalculator />;
+        };
+
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/vcd15cbe7772f49c399c6a5babf22c1241717689176015" integrity="sha512-ZpsOmlRQV6y907TI0dKBHq9Md29nnaEIPlkf84rnaERnq6zvWvPUqr2ft8M1aS28oN72PdrCzSjY4U6VaAw1EQ==" data-cf-beacon='{"rayId":"96d31c87193877e1","serverTiming":{"name":{"cfExtPri":true,"cfEdge":true,"cfOrigin":true,"cfL4":true,"cfSpeedBrain":true,"cfCacheStatus":true}},"version":"2025.7.0","token":"4edd5f8ec12a48cfa682ab8261b80a79"}' crossorigin="anonymous"></script>
+</body>
+</html>
+    <script id="html_badge_script1">
+        window.__genspark_remove_badge_link = "https://www.genspark.ai/api/html_badge/" +
+            "remove_badge?token=To%2FBnjzloZ3UfQdcSaYfDm%2B3%2BwsNRok9JH9VEH0FcN1jdmLqah5tObTZ5hO4etgvgWsj4wVPn7W6kYkzr9JqSXH5s95XM64dtvrygh4TnGLrtezcj5VzOqje27KlhoDgXGtwvPbbFEseT8CUtnWJf44e1zoVM7F3T08GzACHTXSVETeonAxrXLGginUVzMi7GLjTJbe8mJV4M3EfqY3s3eEVfOSI3VtqdnjI%2FbXb7CCBRHZaOFG2OO%2BS6LD4yogcXBsgCY74AwdggA8MXDftFimDPKEFyc84lhWUAzat15IK%2FS%2FqLdAYYlN9Pcef9yUiJCVRly3nLj9NJdmhbPQhqRkNT0zan5k95rC9ZjpstM4qWl14kCwixsdPLpc%2F7IlzaWjRSLNPdG%2BBodfISInESWZtqxAB8hDmhbieEZrRPX%2FIIUfXoUvz912dJ5bi9LpDSD8o1iEBqRa9MRUJyYyzKoUHHDNApFWwFe5w5%2BVfb4bLAdu8eYvdZ0ed0tCArbG6W2a%2F6WtAepqkJ1MNRy%2F8Mg%3D%3D";
+        window.__genspark_locale = "en-US";
+        window.__genspark_token = "To/BnjzloZ3UfQdcSaYfDm+3+wsNRok9JH9VEH0FcN1jdmLqah5tObTZ5hO4etgvgWsj4wVPn7W6kYkzr9JqSXH5s95XM64dtvrygh4TnGLrtezcj5VzOqje27KlhoDgXGtwvPbbFEseT8CUtnWJf44e1zoVM7F3T08GzACHTXSVETeonAxrXLGginUVzMi7GLjTJbe8mJV4M3EfqY3s3eEVfOSI3VtqdnjI/bXb7CCBRHZaOFG2OO+S6LD4yogcXBsgCY74AwdggA8MXDftFimDPKEFyc84lhWUAzat15IK/S/qLdAYYlN9Pcef9yUiJCVRly3nLj9NJdmhbPQhqRkNT0zan5k95rC9ZjpstM4qWl14kCwixsdPLpc/7IlzaWjRSLNPdG+BodfISInESWZtqxAB8hDmhbieEZrRPX/IIUfXoUvz912dJ5bi9LpDSD8o1iEBqRa9MRUJyYyzKoUHHDNApFWwFe5w5+Vfb4bLAdu8eYvdZ0ed0tCArbG6W2a/6WtAepqkJ1MNRy/8Mg==";
+    </script>
+    
+        <script id="html_badge_script2" src="https://www.genspark.ai/html_badge.js"></script>
+        
+    <script id="html_notice_dialog_script" src="https://www.genspark.ai/notice_dialog.js"></script>
+    
